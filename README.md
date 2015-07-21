@@ -1,92 +1,63 @@
-MeaRec
-======
+Mearec online analysis library
+==============================
 
-The `MeaRec` library is a set of tools, libraries, and a GUI application
-for recording multi-electrode array data from either Multichannel Systems
-arrays, or the HiDens system from the Hierlemann group at ETH Basel.
+A library for performing online analysis of array or intracellular recordings.
 
 (C) 2015 Benjamin Naecker bnaecker@stanford.edu
 
-Components
-==========
-
-- `mealog`
-	- The main application component of the `MeaRec` suite. A GUI application
-	for creating new recordings or playing back old recordings, and visualizing
-	the resulting data.
-- `daqsrv` - A small server application that interfaces with our National
-Instruments data acquisition device, and serves data over the network.
-- `dataclient` 
-	- A client library for talking with and receiving data from the data
-	source servers
-		- `McsClient` A client to the `daqsrv` program collecting data
-		from the MCS array system
-		- `HidensClient` A client to the HiDens data server
-- `h5recording` 
-	- A class for reading and recording data to HDF5 files.
-	- `HidensRecording` and `McsRecording` subclasses
-- `online-analysis`
-	- Classes and functionality for implementing online analysis of
-	data recordings
-- `messaging` 
-	- The Mealog application provides information about the status of its 
-	recording though simple message-based network protocol. The messaging 
-	protocol and a C++ client library are defined here. (This is not yet 
-	fully implemented)
-- `tools` - Miscellaneous tools
-	- `hdf2bin`/`bin2hdf` - Convert between HDF5 recordings and AIB binary format
-	- `fifo2hdf` - Convert from Igor FIFO files to HDF5 recordings (not yet implemented)
-
-
-Dependencies
-============
-
-The `mearec` suite has been tested on Mac OS X 10.9 and 10.10, as well as 
-Ubuntu 14.10.
-
-- C++11 or greater
-- [Qt5] (http://doc.qt.io/qt-5/index.html)
-- [HDF5 (>= 1.8.12 with C++ bindings] (http://hdfgroup.org/HDF5/)
-- [Armadillo C++ linear algebra library] (http://arma.sourceforge.net)
-- [Google Protocol Buffers] (https://developers.google.com/protocol-buffers)
-
-Building
+Overview
 ========
 
-The `mearec` application suite uses `qmake` for its build environment, even for
-those components that are not written using Qt. Each component has its own
-`.pro` file, and can be built independently as:
+The Mearec online analysis library provides several common analyses, such as
+spike-triggered averages, as well as a relatively easy API for writing new,
+custom analyses. Stimuli must be created beforehand, and stored in HDF5 
+files (see format below). The library provides tools for reading these stimuli
+from disk, and an easy way to plug in custom functions to the analysis pipeline.
 
-	$ cd <component>
-	$ qmake5 && make
+Stimulus files
+==============
 
-The entire project can be built, either in debug or release mode, by just calling
-`qmake5` in the top `mearec` directory.
+Stimuli are expected to be stored in HDF5 file formats. The stimulus itself
+must be a single dataset, which can be 1-, 2-, or 3-dimensional, of arbitrary
+size. It is expected that the last dimension is time. So, for example, 
+a white noise lines stimulus would have dimension [nbars-by-nframes]. 
 
-Data files
-==========
+The dataset is assumed to be called simply "stimulus", but you can provide
+a name of your choosing when constructing objects needed to represent the 
+stimulus in memory. This allows you to perform analyses on only one of several
+datasets in a single file.
 
-A quick note about data file formats. Data is stored in HDF5 format, and the
-`mearec` suite includes tools to convert old-school binary files to HDF5 and
-back. However, data is stored in memory using the Armadillo C++ linear algebra
-library's matrices, since the format is efficient, convenient, and allows 
-easy online computations if desired.
+The only other requirement of the data file is that the stimulus dataset must
+have an attribute giving the expected frame rate of the monitor. This is used
+to determine which frames of the stimulus will be read when performing analyses.
 
-This presents a bit of a weird situation, because HDF5 uses row-major data 
-ordering, while Armadillo uses column-major. This means data is stored on
-disk as a dataset with shape (numChannels, numSamples), but in memory as
-(numSamples, numChannels). This allows each library to have access to the data
-in its most efficient stride pattern, without transposing any data. It is 
-not inefficient or wrong, but may lead to programming or debugging confusion.
+Analysis plugin API
+===================
 
-Attributions
-============
+New online analyses can be written at any time, compiled, and added dynamically
+to Mearec. Under the hood, this is done with Qt's plugin and dynamic library
+functionality. As a user, this complexity is hidden; simply subclass the base
+online analysis class and reimplement its `run` method. This method will be
+called periodically, as new data is received, and implements the core computation
+performed by the online analysis.
 
-Most code here is copyrighted by Benjamin Naecker (bnaecker@stanford.edu), with
-one very notable exception.
+The `run` method is quite simple. It takes a chunk of data and a chunk of stimulus,
+and performs some computation including the two. The amount of data and stimulus
+that are received are defined by the refresh rate of the Mearec display. A faster
+refresh rate means a shorter section of data and stimulus are handed off.
 
-`QCustomPlot` is the library used for creating plots of data. This code is
-copyrighted by Emanuel Eichhammer, whose contact info can be found 
-[here](http://www.qcustomplot.com/index.php/contact). The work here is 
-greatly indebted to this wonderful library.
+The library automatically handles upsampling of the stimulus array, based on the
+monitor frame rate given to the analysis class constructors. The data is always
+a 1-dimensional vector, whose number of elements matches the size of the last
+dimension of the stimulus. This makes it easy to do reverse-correlation, for
+example, by simply computing the convolution of the stimulus and data, and taking
+a small chunk of the result.
+
+There are three provided signatures for the `run` method, one for each possible
+stimulus dimensionality.
+
+	run(const arma::vec& data, const arma::vec& stim1d);
+	run(const arma::vec& data, const arma::mat& stim2d);
+	run(const arma::vec& data, const arma::cube& stim3d);
+
 
